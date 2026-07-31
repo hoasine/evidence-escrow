@@ -22,3 +22,4 @@ __pycache__/
 /frontend/next-env.d.ts
 /frontend/.vercel
 *.compiled.js
+.vercel
