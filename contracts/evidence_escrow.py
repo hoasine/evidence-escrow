@@ -35,6 +35,8 @@ class Dispute:
     verdict: str
     reasoning: str
     confidence: u256
+    filed_at: u256
+    response_deadline_at: u256
     status: str
     paid_out: u256
 
@@ -42,9 +44,22 @@ class Dispute:
 class EvidenceEscrow(gl.Contract):
     disputes: TreeMap[u256, Dispute]
     dispute_count: u256
+    default_response_window_seconds: u256
 
     def __init__(self):
         self.dispute_count = u256(0)
+        # 72 hours default response deadline.
+        self.default_response_window_seconds = u256(72 * 60 * 60)
+
+    def _now_epoch(self) -> u256:
+        try:
+            ts = getattr(gl.message, "datetime", None)
+            if ts is not None:
+                return u256(int(ts.timestamp()))
+        except Exception:
+            pass
+        # Deterministic fallback for environments without datetime.
+        return u256(1_700_000_000 + int(self.dispute_count))
 
     def _scrape_urls(self, urls_csv: str) -> str:
         chunks = []
@@ -77,6 +92,8 @@ class EvidenceEscrow(gl.Contract):
             "verdict": d.verdict,
             "reasoning": d.reasoning,
             "confidence": int(d.confidence),
+            "filed_at": int(d.filed_at),
+            "response_deadline_at": int(d.response_deadline_at),
             "status": d.status,
             "paid_out": int(d.paid_out) == 1,
         }
@@ -88,6 +105,7 @@ class EvidenceEscrow(gl.Contract):
         title: str,
         claim: str,
         evidence_urls: str,
+        response_window_seconds: u256,
     ) -> None:
         stake = gl.message.value
         if stake == 0:
@@ -102,9 +120,16 @@ class EvidenceEscrow(gl.Contract):
         defendant_addr = Address(str(defendant).strip())
         if defendant_addr == gl.message.sender_address:
             raise gl.vm.UserError("Cannot dispute yourself")
+        window_seconds = int(response_window_seconds)
+        if window_seconds < 0:
+            raise gl.vm.UserError("response_window_seconds must be >= 0")
+        if window_seconds > 30 * 24 * 60 * 60:
+            raise gl.vm.UserError("response_window_seconds too large (max 30 days)")
 
         dispute_id = self.dispute_count
         self.dispute_count = u256(int(self.dispute_count) + 1)
+        now_epoch = self._now_epoch()
+        response_deadline = u256(int(now_epoch) + window_seconds)
 
         self.disputes[dispute_id] = Dispute(
             id=dispute_id,
@@ -120,6 +145,8 @@ class EvidenceEscrow(gl.Contract):
             verdict="",
             reasoning="",
             confidence=u256(0),
+            filed_at=now_epoch,
+            response_deadline_at=response_deadline,
             status="OPEN",
             paid_out=u256(0),
         )
@@ -137,6 +164,8 @@ class EvidenceEscrow(gl.Contract):
         d = self.disputes[dispute_id]
         if d.status != "OPEN":
             raise gl.vm.UserError("Dispute is not open for defense")
+        if int(self._now_epoch()) > int(d.response_deadline_at):
+            raise gl.vm.UserError("Defense deadline has passed; claimant can recover stake")
         if gl.message.sender_address != d.defendant:
             raise gl.vm.UserError("Only the defendant can submit a defense")
         if not defense or not str(defense).strip():
@@ -152,6 +181,31 @@ class EvidenceEscrow(gl.Contract):
         d.defense_urls = str(evidence_urls).strip()[:2000]
         d.defendant_stake = stake
         d.status = "READY"
+
+    @gl.public.write
+    def cancel_expired_dispute(self, dispute_id: u256) -> None:
+        if dispute_id not in self.disputes:
+            raise gl.vm.UserError("Dispute not found")
+
+        d = self.disputes[dispute_id]
+        if d.status != "OPEN":
+            raise gl.vm.UserError("Only open disputes can be cancelled")
+        if gl.message.sender_address != d.plaintiff:
+            raise gl.vm.UserError("Only claimant can cancel expired dispute")
+        if int(self._now_epoch()) <= int(d.response_deadline_at):
+            raise gl.vm.UserError("Response deadline not reached yet")
+        if int(d.paid_out) == 1:
+            raise gl.vm.UserError("Dispute already paid out")
+
+        stake = d.plaintiff_stake
+        d.status = "CANCELLED"
+        d.verdict = "EXPIRED_NO_RESPONSE"
+        d.reasoning = "Respondent missed the defense deadline; claimant stake returned."
+        d.confidence = u256(10)
+        d.paid_out = u256(1)
+
+        if stake > 0:
+            _Recipient(d.plaintiff).emit_transfer(value=stake)
 
     @gl.public.write
     def judge_dispute(self, dispute_id: u256) -> None:

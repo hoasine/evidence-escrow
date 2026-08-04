@@ -38,6 +38,7 @@ export function useFileDispute() {
       claim: string;
       evidenceUrls: string;
       stakeWei: bigint;
+      responseWindowSeconds?: number;
     }) => {
       if (!client) throw new Error("Contract address not set");
       await ensureGenLayerNetwork();
@@ -46,7 +47,8 @@ export function useFileDispute() {
         input.title,
         input.claim,
         input.evidenceUrls,
-        input.stakeWei
+        input.stakeWei,
+        input.responseWindowSeconds
       );
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["disputes"] }),
@@ -84,6 +86,19 @@ export function useJudgeDispute() {
       if (!client) throw new Error("Contract address not set");
       await ensureGenLayerNetwork();
       return client.judgeDispute(disputeId);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["disputes"] }),
+  });
+}
+
+export function useCancelExpiredDispute() {
+  const client = useEscrowClient();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (disputeId: number) => {
+      if (!client) throw new Error("Contract address not set");
+      await ensureGenLayerNetwork();
+      return client.cancelExpiredDispute(disputeId);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["disputes"] }),
   });

@@ -140,14 +140,23 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
 
     const handleAccountsChanged = async (accounts: string[]) => {
+      // Respect explicit user disconnect intent:
+      // MetaMask may still report authorized accounts, but UI must stay disconnected
+      // until user actively clicks "Connect" again.
+      const hasDisconnectIntent =
+        typeof window !== "undefined" &&
+        localStorage.getItem(DISCONNECT_FLAG) === "true";
+      if (hasDisconnectIntent && accounts.length > 0) {
+        setState((prev) => ({
+          ...prev,
+          address: null,
+          isConnected: false,
+        }));
+        return;
+      }
+
       const chainId = await getCurrentChainId();
       const correctNetwork = await isOnGenLayerNetwork();
-
-      // If user connected via MetaMask UI, clear the disconnect flag
-      // This allows future auto-reconnects
-      if (accounts.length > 0 && typeof window !== "undefined") {
-        localStorage.removeItem(DISCONNECT_FLAG);
-      }
 
       setState((prev) => ({
         ...prev,
@@ -200,8 +209,15 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const connectWallet = useCallback(async () => {
     try {
       setState((prev) => ({ ...prev, isLoading: true }));
+      // If user explicitly disconnected before, force MetaMask account picker
+      // instead of silently reusing the previous authorized account.
+      const wasDisconnected =
+        typeof window !== "undefined" &&
+        localStorage.getItem(DISCONNECT_FLAG) === "true";
 
-      const address = await connectMetaMask();
+      const address = wasDisconnected
+        ? await switchAccount()
+        : await connectMetaMask();
       const chainId = await getCurrentChainId();
       const correctNetwork = await isOnGenLayerNetwork();
 

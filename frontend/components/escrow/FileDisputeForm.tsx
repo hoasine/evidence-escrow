@@ -11,6 +11,8 @@ import { useWallet } from "@/lib/genlayer/WalletProvider";
 import { parseGenToWei } from "@/lib/utils/format";
 import { success, error as toastError } from "@/lib/utils/toast";
 
+const DEFAULT_RESPONSE_WINDOW_SECONDS = 72 * 60 * 60;
+
 export function FileDisputeForm({ onDone }: { onDone?: () => void }) {
   const { isConnected, address } = useWallet();
   const file = useFileDispute();
@@ -44,6 +46,7 @@ export function FileDisputeForm({ onDone }: { onDone?: () => void }) {
         claim: claim.trim(),
         evidenceUrls: urls.trim(),
         stakeWei: parseGenToWei(stake),
+        responseWindowSeconds: DEFAULT_RESPONSE_WINDOW_SECONDS,
       });
       success("Case filed", {
         description: `Docket #${id} is on-chain. Settlement begins when the respondent matches the stake.`,
@@ -69,6 +72,9 @@ export function FileDisputeForm({ onDone }: { onDone?: () => void }) {
         <p className="mt-1.5 text-sm text-muted-foreground">
           Lock GEN against a counterparty. They must match your stake and submit defense evidence
           before judgment can run.
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Response deadline: 72 hours. If no response arrives, you can recover your stake.
         </p>
       </div>
 

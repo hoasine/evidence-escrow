@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import type { DisputeView } from "@/lib/contracts/EvidenceEscrow";
 import {
+  useCancelExpiredDispute,
   useJudgeDispute,
   useSubmitDefense,
 } from "@/lib/hooks/useEvidenceEscrow";
@@ -19,6 +20,7 @@ function statusLabel(status: string) {
   if (status === "OPEN") return "Awaiting response";
   if (status === "READY") return "Ready for judgment";
   if (status === "JUDGED") return "Settled";
+  if (status === "CANCELLED") return "Cancelled";
   return status;
 }
 
@@ -26,24 +28,38 @@ function verdictClass(v: string) {
   if (v === "PLAINTIFF_WINS") return "text-green-400";
   if (v === "DEFENDANT_WINS") return "text-blue-400";
   if (v === "INSUFFICIENT_EVIDENCE") return "text-amber-400";
+  if (v === "EXPIRED_NO_RESPONSE") return "text-amber-300";
   return "text-muted-foreground";
 }
 
 export function DisputeCard({ dispute }: { dispute: DisputeView }) {
-  const { address } = useWallet();
+  const { address, isConnected } = useWallet();
   const defend = useSubmitDefense();
   const judge = useJudgeDispute();
+  const cancelExpired = useCancelExpiredDispute();
   const [defense, setDefense] = useState("");
   const [urls, setUrls] = useState("");
   const [open, setOpen] = useState(false);
 
   const me = address?.toLowerCase();
   const isDefendant = me && dispute.defendant.toLowerCase() === me;
-  const canDefend = dispute.status === "OPEN" && isDefendant;
-  const canJudge = dispute.status === "READY";
+  const isClaimant = me && dispute.plaintiff.toLowerCase() === me;
+  const canDefend = Boolean(isConnected) && dispute.status === "OPEN" && isDefendant;
+  const canJudge = Boolean(isConnected) && dispute.status === "READY";
+  const isExpired =
+    dispute.status === "OPEN" &&
+    typeof dispute.response_deadline_at === "number" &&
+    Math.floor(Date.now() / 1000) > dispute.response_deadline_at;
+  const canCancelExpired = Boolean(isConnected) && Boolean(isClaimant) && isExpired;
 
   const onDefend = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isConnected) {
+      toastError("Wallet disconnected", {
+        description: "Please connect your wallet again before submitting a response.",
+      });
+      return;
+    }
     try {
       await defend.mutateAsync({
         disputeId: dispute.id,
@@ -63,6 +79,12 @@ export function DisputeCard({ dispute }: { dispute: DisputeView }) {
   };
 
   const onJudge = async () => {
+    if (!isConnected) {
+      toastError("Wallet disconnected", {
+        description: "Please connect your wallet again before executing judgment.",
+      });
+      return;
+    }
     try {
       await judge.mutateAsync(dispute.id);
       success("Settlement complete", {
@@ -70,6 +92,25 @@ export function DisputeCard({ dispute }: { dispute: DisputeView }) {
       });
     } catch (err) {
       toastError("Judgment failed", {
+        description: err instanceof Error ? err.message : "Unknown error",
+      });
+    }
+  };
+
+  const onCancelExpired = async () => {
+    if (!isConnected) {
+      toastError("Wallet disconnected", {
+        description: "Please connect your wallet again before recovering funds.",
+      });
+      return;
+    }
+    try {
+      await cancelExpired.mutateAsync(dispute.id);
+      success("Stake recovered", {
+        description: "Response deadline passed. The case was cancelled and funds returned.",
+      });
+    } catch (err) {
+      toastError("Cancellation failed", {
         description: err instanceof Error ? err.message : "Unknown error",
       });
     }
@@ -110,6 +151,12 @@ export function DisputeCard({ dispute }: { dispute: DisputeView }) {
       <p className="truncate text-xs text-muted-foreground" title={dispute.plaintiff_urls}>
         Evidence · {dispute.plaintiff_urls}
       </p>
+      {dispute.status === "OPEN" && (
+        <p className="text-xs text-muted-foreground">
+          Response deadline:{" "}
+          {new Date(dispute.response_deadline_at * 1000).toLocaleString()}
+        </p>
+      )}
 
       <div className="flex items-center gap-2 text-[0.7rem] font-semibold uppercase tracking-wider text-muted-foreground">
         <span className="text-accent">Filed</span>
@@ -157,6 +204,15 @@ export function DisputeCard({ dispute }: { dispute: DisputeView }) {
             ) : (
               "Execute judgment"
             )}
+          </Button>
+        )}
+        {canCancelExpired && (
+          <Button
+            variant="outline"
+            onClick={onCancelExpired}
+            disabled={cancelExpired.isPending}
+          >
+            {cancelExpired.isPending ? "Recovering…" : "Recover expired stake"}
           </Button>
         )}
       </div>

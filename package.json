@@ -1,15 +1,10 @@
 {
   "name": "evidence-escrow",
-  "type": "module",
   "private": true,
   "scripts": {
-    "dev": "cd frontend && npm run dev",
-    "build": "cd frontend && npm run build",
-    "start": "cd frontend && npm run start",
-    "lint": "cd frontend && npm run lint",
-    "deploy": "genlayer deploy"
-  },
-  "devDependencies": {
-    "genlayer-js": "^0.18.3"
+    "dev": "npm run dev --prefix frontend",
+    "build": "npm run build --prefix frontend",
+    "start": "npm run start --prefix frontend",
+    "install:frontend": "npm install --prefix frontend"
   }
 }

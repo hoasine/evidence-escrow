@@ -23,6 +23,8 @@ export type DisputeView = {
   verdict: string;
   reasoning: string;
   confidence: number;
+  filed_at: number;
+  response_deadline_at: number;
   status: string;
   paid_out: boolean;
 };
@@ -169,15 +171,35 @@ export class EvidenceEscrowClient {
     title: string,
     claim: string,
     evidenceUrls: string,
-    stakeWei: bigint
+    stakeWei: bigint,
+    responseWindowSeconds = 72 * 60 * 60
   ) {
     const before = await this.getDisputeCount();
-    const hash = await this.client.writeContract({
-      address: this.contractAddress,
-      functionName: "file_dispute",
-      args: [defendant, title, claim, evidenceUrls],
-      value: stakeWei,
-    });
+    let hash: Awaited<ReturnType<typeof this.client.writeContract>>;
+    try {
+      // New contract signature: file_dispute(defendant, title, claim, evidence_urls, response_window_seconds)
+      hash = await this.client.writeContract({
+        address: this.contractAddress,
+        functionName: "file_dispute",
+        args: [defendant, title, claim, evidenceUrls, responseWindowSeconds],
+        value: stakeWei,
+      });
+    } catch (err) {
+      const msg = String(err instanceof Error ? err.message : err).toLowerCase();
+      const legacyMismatch =
+        msg.includes("takes 5 positional arguments but 6 were given") ||
+        msg.includes("unexpected argument") ||
+        msg.includes("wrong number of arguments");
+      if (!legacyMismatch) throw err;
+
+      // Legacy contract signature: file_dispute(defendant, title, claim, evidence_urls)
+      hash = await this.client.writeContract({
+        address: this.contractAddress,
+        functionName: "file_dispute",
+        args: [defendant, title, claim, evidenceUrls],
+        value: stakeWei,
+      });
+    }
     await this.waitForWrite(hash, { ...FAST_TX_WAIT, requireFinalized: true });
     for (let i = 0; i < 20; i++) {
       const n = await this.getDisputeCount();
@@ -210,5 +232,15 @@ export class EvidenceEscrowClient {
       value: 0n,
     });
     return this.waitForWrite(hash, { ...AI_TX_WAIT, requireFinalized: true });
+  }
+
+  async cancelExpiredDispute(disputeId: number) {
+    const hash = await this.client.writeContract({
+      address: this.contractAddress,
+      functionName: "cancel_expired_dispute",
+      args: [disputeId],
+      value: 0n,
+    });
+    return this.waitForWrite(hash, { ...FAST_TX_WAIT, requireFinalized: true });
   }
 }
