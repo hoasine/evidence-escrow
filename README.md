@@ -19,7 +19,7 @@
 
 ## Overview
 
-Evidence Escrow is a bilateral dispute settlement protocol where two parties lock equal GEN against public evidence URLs. GenLayer validators independently fetch both sides, reach consensus on a verdict, and the contract pays out automatically.
+Evidence Escrow is a bilateral dispute settlement protocol where two parties lock equal GEN against public evidence URLs. GenLayer validators independently fetch both sides, reach consensus on a verdict, and settle the escrow on-chain.
 
 The protocol is designed to remove middlemen from small commercial disputes with a strict matched-stake flow:
 
@@ -27,7 +27,9 @@ The protocol is designed to remove middlemen from small commercial disputes with
 2. `submit_defense` requires the respondent to **match the same stake** before judgment
 3. Each case has a **response deadline**, preventing indefinite claimant fund lock
 4. `cancel_expired_dispute` lets the claimant recover stake if no response arrives in time
-5. `judge_dispute` scrapes both evidence sets via AI consensus and settles the escrow
+5. `judge_dispute` issues a first verdict and opens a timed appeal window
+6. `appeal_dispute` lets the losing side post new evidence with matching stake
+7. `resolve_appeal` or `finalize_dispute` executes final settlement on-chain
 
 This means neither party can rush a one-sided judgment, and payouts are driven by on-chain consensus over public web evidence.
 
@@ -36,6 +38,8 @@ This means neither party can rush a one-sided judgment, and payouts are driven b
 - **Matched escrow:** both parties commit equal GEN before settlement
 - **Public evidence only:** validators fetch URLs with `web.render` — no private uploads
 - **AI consensus judgment:** Optimistic Democracy over both sides’ records
+- **Appeal layer:** loser can challenge within a bounded window using fresh evidence
+- **Deterministic finalization:** payout runs after appeal resolution or appeal timeout
 - **Automatic payout:** winner receives the pool; insufficient evidence refunds both
 - **Timeout recovery path:** claimant can cancel and recover if respondent misses deadline
 - **Prompt-injection hardened:** user data wrapped in `BEGIN/END` markers and truncated
@@ -44,9 +48,22 @@ This means neither party can rush a one-sided judgment, and payouts are driven b
 
 1. **Claimant files a case** (title, claim, evidence URLs) and locks GEN
 2. **Respondent matches stake** and submits defense + evidence URLs
-3. **Anyone triggers judgment** once the case is `READY`
-4. **Validators scrape both URL sets** and agree on verdict + confidence
-5. **Contract settles escrow** on-chain according to the verdict
+3. **Anyone triggers first judgment** once the case is `READY`
+4. **Validators scrape both URL sets** and produce verdict + confidence
+5. **Appeal window opens** (`JUDGED`) for the losing side only
+6. **Loser may appeal** with matching stake + new evidence (`APPEALED`)
+7. **Contract finalizes payout** via `resolve_appeal` or `finalize_dispute`
+
+## Appeal Layer (MVP)
+
+- **Window:** default 24h after first judgment (`default_appeal_window_seconds`)
+- **Who can appeal:** only the losing party of `PLAINTIFF_WINS` / `DEFENDANT_WINS`
+- **Stake rule:** appeal stake must match the original plaintiff stake
+- **Evidence rule:** appeal requires reason text + new evidence URLs
+- **Resolution:** AI re-evaluates full record plus appeal evidence
+- **Outcome economics:**
+  - If verdict is unchanged, appealer loses appeal stake (awarded to winner)
+  - If verdict is reversed, appeal succeeds and final payout follows reversed verdict
 
 ## Risk Controls
 
@@ -54,11 +71,12 @@ This means neither party can rush a one-sided judgment, and payouts are driven b
 |------|-------------------------------|
 | Self-dispute / griefing own case | Claimant cannot file against their own address |
 | One-sided rush to judgment | Defense + matched stake required before `judge_dispute` |
+| Low confidence in single-pass AI verdict | Bounded appeal window with stake-backed challenge |
 | Claimant funds locked forever by silence | Response deadline + `cancel_expired_dispute` recovery path |
 | Unequal capital pressure | Defense stake must equal plaintiff stake exactly |
 | Prompt injection via evidence text | `BEGIN/END` markers + truncated inputs/scrapes |
 | Unstable AI severity scores | Verdict must match; confidence within ±2 tolerance |
-| Double payout / reentrancy-style issues | State set to `JUDGED` / `paid_out` before transfers |
+| Double payout / reentrancy-style issues | `paid_out` guard + terminal `FINALIZED` state before/at transfer |
 | Opaque settlement | Verdict, reasoning, and escrow amounts stored on-chain |
 
 ## Core Contract API
@@ -68,7 +86,10 @@ This means neither party can rush a one-sided judgment, and payouts are driven b
 | `file_dispute` | write (payable) | Opens a case and locks claimant GEN with evidence URLs + `response_window_seconds` |
 | `submit_defense` | write (payable) | Respondent matches stake and posts defense evidence |
 | `cancel_expired_dispute` | write | After deadline, claimant cancels unresponsive case and recovers stake |
-| `judge_dispute` | write | AI scrapes both sides, consensus verdict, then auto-payout |
+| `judge_dispute` | write | AI scrapes both sides and writes first verdict + appeal deadline |
+| `appeal_dispute` | write (payable) | Losing side locks appeal stake and submits new evidence URLs |
+| `resolve_appeal` | write | AI re-judges with appeal evidence and finalizes payout |
+| `finalize_dispute` | write | Finalizes payout when appeal window expires with no appeal |
 | `get_dispute` | view | Returns full case state (claim, stakes, verdict, status) |
 | `get_all_disputes` | view | Lists all dockets |
 | `get_dispute_count` | view | Total number of cases |
@@ -90,6 +111,7 @@ This means neither party can rush a one-sided judgment, and payouts are driven b
 - Settlement payout branch: `PLAINTIFF_WINS`
 - Settlement payout branch: `DEFENDANT_WINS`
 - Settlement refund branch: `INSUFFICIENT_EVIDENCE`
+- Appeal branch: loser appeals and verdict can be reversed before finalization
 
 Run:
 

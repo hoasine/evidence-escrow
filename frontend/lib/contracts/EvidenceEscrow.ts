@@ -25,6 +25,12 @@ export type DisputeView = {
   confidence: number;
   filed_at: number;
   response_deadline_at: number;
+  judged_at: number;
+  appeal_deadline_at: number;
+  appeal_by: string;
+  appeal_reason: string;
+  appeal_urls: string;
+  appeal_stake: number;
   status: string;
   paid_out: boolean;
 };
@@ -242,5 +248,40 @@ export class EvidenceEscrowClient {
       value: 0n,
     });
     return this.waitForWrite(hash, { ...FAST_TX_WAIT, requireFinalized: true });
+  }
+
+  async finalizeDispute(disputeId: number) {
+    const hash = await this.client.writeContract({
+      address: this.contractAddress,
+      functionName: "finalize_dispute",
+      args: [disputeId],
+      value: 0n,
+    });
+    return this.waitForWrite(hash, { ...FAST_TX_WAIT, requireFinalized: true });
+  }
+
+  async appealDispute(
+    disputeId: number,
+    reason: string,
+    evidenceUrls: string,
+    stakeWei: bigint
+  ) {
+    const hash = await this.client.writeContract({
+      address: this.contractAddress,
+      functionName: "appeal_dispute",
+      args: [disputeId, reason, evidenceUrls],
+      value: stakeWei,
+    });
+    return this.waitForWrite(hash, { ...FAST_TX_WAIT, requireFinalized: true });
+  }
+
+  async resolveAppeal(disputeId: number) {
+    const hash = await this.client.writeContract({
+      address: this.contractAddress,
+      functionName: "resolve_appeal",
+      args: [disputeId],
+      value: 0n,
+    });
+    return this.waitForWrite(hash, { ...AI_TX_WAIT, requireFinalized: true });
   }
 }

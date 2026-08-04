@@ -103,3 +103,52 @@ export function useCancelExpiredDispute() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["disputes"] }),
   });
 }
+
+export function useFinalizeDispute() {
+  const client = useEscrowClient();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (disputeId: number) => {
+      if (!client) throw new Error("Contract address not set");
+      await ensureGenLayerNetwork();
+      return client.finalizeDispute(disputeId);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["disputes"] }),
+  });
+}
+
+export function useAppealDispute() {
+  const client = useEscrowClient();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      disputeId: number;
+      reason: string;
+      evidenceUrls: string;
+      stakeWei: bigint;
+    }) => {
+      if (!client) throw new Error("Contract address not set");
+      await ensureGenLayerNetwork();
+      return client.appealDispute(
+        input.disputeId,
+        input.reason,
+        input.evidenceUrls,
+        input.stakeWei
+      );
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["disputes"] }),
+  });
+}
+
+export function useResolveAppeal() {
+  const client = useEscrowClient();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (disputeId: number) => {
+      if (!client) throw new Error("Contract address not set");
+      await ensureGenLayerNetwork();
+      return client.resolveAppeal(disputeId);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["disputes"] }),
+  });
+}
