@@ -61,14 +61,31 @@ class EvidenceEscrow(gl.Contract):
         self.default_appeal_window_seconds = u256(24 * 60 * 60)
 
     def _now_epoch(self) -> u256:
+        # GenVM pins datetime.now() / time.time() to the transaction timestamp.
+        # Prefer that over gl.message.datetime + a hard-coded 2023 fallback.
         try:
-            ts = getattr(gl.message, "datetime", None)
-            if ts is not None:
-                return u256(int(ts.timestamp()))
+            from datetime import datetime, timezone
+
+            return u256(int(datetime.now(timezone.utc).timestamp()))
         except Exception:
             pass
-        # Deterministic fallback for environments without datetime.
-        return u256(1_700_000_000 + int(self.dispute_count))
+        try:
+            import time as _time
+
+            return u256(int(_time.time()))
+        except Exception:
+            pass
+        try:
+            raw = gl.message_raw.get("datetime")
+            if raw:
+                from datetime import datetime
+
+                text = str(raw).replace("Z", "+00:00")
+                return u256(int(datetime.fromisoformat(text).timestamp()))
+        except Exception:
+            pass
+        # Schema/sandbox fallback only (≈ Aug 2026). Prefer real tx clock above.
+        return u256(1_788_000_000 + int(self.dispute_count))
 
     def _scrape_urls(self, urls_csv: str) -> str:
         chunks = []

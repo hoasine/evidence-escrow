@@ -11,7 +11,23 @@ import { useWallet } from "@/lib/genlayer/WalletProvider";
 import { parseGenToWei } from "@/lib/utils/format";
 import { success, error as toastError } from "@/lib/utils/toast";
 
-const DEFAULT_RESPONSE_WINDOW_SECONDS = 72 * 60 * 60;
+const RESPONSE_DEADLINE_OPTIONS = [
+  { value: "0", label: "Immediate (0s) — test recover path", seconds: 0 },
+  { value: "3600", label: "1 hour", seconds: 60 * 60 },
+  { value: "86400", label: "24 hours", seconds: 24 * 60 * 60 },
+  { value: "259200", label: "72 hours (default)", seconds: 72 * 60 * 60 },
+  { value: "604800", label: "7 days", seconds: 7 * 24 * 60 * 60 },
+  { value: "custom", label: "Custom…", seconds: -1 },
+] as const;
+
+function formatDeadlineHint(seconds: number) {
+  if (seconds <= 0) {
+    return "Deadline is immediate. You can recover stake right after filing if no response arrives.";
+  }
+  if (seconds < 3600) return `Response window: ${seconds} seconds.`;
+  if (seconds < 86400) return `Response window: ${Math.round(seconds / 3600)} hour(s).`;
+  return `Response window: ${Math.round(seconds / 86400)} day(s).`;
+}
 
 export function FileDisputeForm({ onDone }: { onDone?: () => void }) {
   const { isConnected, address } = useWallet();
@@ -21,8 +37,22 @@ export function FileDisputeForm({ onDone }: { onDone?: () => void }) {
   const [claim, setClaim] = useState("");
   const [urls, setUrls] = useState("");
   const [stake, setStake] = useState("0.1");
+  const [deadlineOption, setDeadlineOption] = useState("259200");
+  const [customHours, setCustomHours] = useState("2");
 
   const pending = file.isPending;
+
+  const resolveResponseWindowSeconds = (): number | null => {
+    if (deadlineOption === "custom") {
+      const hours = Number(customHours);
+      if (!Number.isFinite(hours) || hours < 0) return null;
+      const seconds = Math.floor(hours * 60 * 60);
+      if (seconds > 30 * 24 * 60 * 60) return null;
+      return seconds;
+    }
+    const selected = RESPONSE_DEADLINE_OPTIONS.find((o) => o.value === deadlineOption);
+    return selected && selected.seconds >= 0 ? selected.seconds : null;
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,6 +69,13 @@ export function FileDisputeForm({ onDone }: { onDone?: () => void }) {
       });
       return;
     }
+    const responseWindowSeconds = resolveResponseWindowSeconds();
+    if (responseWindowSeconds === null) {
+      toastError("Invalid deadline", {
+        description: "Choose a preset or enter custom hours between 0 and 720 (30 days).",
+      });
+      return;
+    }
     try {
       const id = await file.mutateAsync({
         defendant: defendant.trim(),
@@ -46,10 +83,13 @@ export function FileDisputeForm({ onDone }: { onDone?: () => void }) {
         claim: claim.trim(),
         evidenceUrls: urls.trim(),
         stakeWei: parseGenToWei(stake),
-        responseWindowSeconds: DEFAULT_RESPONSE_WINDOW_SECONDS,
+        responseWindowSeconds,
       });
       success("Case filed", {
-        description: `Docket #${id} is on-chain. Settlement begins when the respondent matches the stake.`,
+        description:
+          responseWindowSeconds === 0
+            ? `Docket #${id} filed with immediate deadline. You can recover stake if no response arrives.`
+            : `Docket #${id} is on-chain. Settlement begins when the respondent matches the stake.`,
       });
       setTitle("");
       setClaim("");
@@ -74,7 +114,7 @@ export function FileDisputeForm({ onDone }: { onDone?: () => void }) {
           before judgment can run.
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Response deadline: 72 hours. If no response arrives, you can recover your stake.
+          Choose a response deadline below. If no response arrives in time, you can recover your stake.
         </p>
       </div>
 
@@ -129,6 +169,47 @@ export function FileDisputeForm({ onDone }: { onDone?: () => void }) {
         />
         <p className="text-xs text-muted-foreground">
           Comma-separated public links. Validators will fetch these during judgment.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="deadline">Response deadline</Label>
+        <select
+          id="deadline"
+          value={deadlineOption}
+          onChange={(e) => setDeadlineOption(e.target.value)}
+          disabled={!isConnected || pending}
+          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {RESPONSE_DEADLINE_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        {deadlineOption === "custom" && (
+          <div className="flex items-center gap-2">
+            <Input
+              id="customHours"
+              required
+              value={customHours}
+              onChange={(e) => setCustomHours(e.target.value)}
+              inputMode="decimal"
+              className="max-w-[8rem]"
+              placeholder="Hours"
+              disabled={!isConnected || pending}
+            />
+            <span className="text-sm text-muted-foreground">hours (0–720)</span>
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground">
+          {(() => {
+            const seconds = resolveResponseWindowSeconds();
+            if (seconds === null) {
+              return "Enter custom hours between 0 and 720 (30 days).";
+            }
+            return formatDeadlineHint(seconds);
+          })()}
         </p>
       </div>
 

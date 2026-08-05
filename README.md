@@ -42,6 +42,7 @@ This means neither party can rush a one-sided judgment, and payouts are driven b
 - **Deterministic finalization:** payout runs after appeal resolution or appeal timeout
 - **Automatic payout:** winner receives the pool; insufficient evidence refunds both
 - **Timeout recovery path:** claimant can cancel and recover if respondent misses deadline
+- **Configurable deadlines:** file form presets (including `0s` for recover demos) plus custom hours
 - **Prompt-injection hardened:** user data wrapped in `BEGIN/END` markers and truncated
 
 ## Protocol Flow
@@ -64,6 +65,20 @@ This means neither party can rush a one-sided judgment, and payouts are driven b
 - **Outcome economics:**
   - If verdict is unchanged, appealer loses appeal stake (awarded to winner)
   - If verdict is reversed, appeal succeeds and final payout follows reversed verdict
+
+## Response Deadline Controls
+
+Claimants choose a response window when filing:
+
+| Preset | Use |
+|--------|-----|
+| Immediate (`0s`) | Demo / test `cancel_expired_dispute` right after filing |
+| 1 hour / 24 hours / 72 hours / 7 days | Normal production windows |
+| Custom hours (0–720) | Flexible deadlines up to 30 days |
+
+- Contract timestamps use GenVM transaction clock (`datetime.now` / `time.time`), not a hard-coded 2023 fallback
+- After the deadline, only the claimant can call `cancel_expired_dispute` and recover stake
+- UI shows the on-chain deadline and the **Recover expired stake** action when eligible
 
 ## Risk Controls
 
